@@ -22,13 +22,13 @@ pipeline {
                     # Install kubectl (latest version for EKS)
                     curl -o kubectl https://s3.us-west-2.amazonaws.com/amazon-eks/1.30.0/2024-09-20/bin/linux/amd64/kubectl
                     chmod +x ./kubectl
-                    sudo mv ./kubectl /usr/local/bin/kubectl
+                    mv ./kubectl /usr/local/bin/kubectl
                     kubectl version --client
 
                     # Install eksctl
                     curl -sLO "https://github.com/eksctl-io/eksctl/releases/latest/download/eksctl_$(uname -s)_amd64.tar.gz"
                     tar -xzf eksctl_$(uname -s)_amd64.tar.gz
-                    sudo mv eksctl /usr/local/bin
+                    mv eksctl /usr/local/bin
                     eksctl version
                     '''
                 }
