@@ -2,31 +2,32 @@ pipeline {
     agent any
 
     tools {
-        nodejs "node23"
+        nodejs "node23" // NodeJS configured in Jenkins
     }
 
     environment {
-        AWS_REGION = "eu-north-1"
-        CLUSTER_NAME = "tyson-cluster-"3
-        DOCKERHUB_USER = "varaprasadrenati"
-        DOCKER_IMAGE = "varaprasadrenati/node-app"
-        PATH = "${env.WORKSPACE}/bin:${env.PATH}"
+        AWS_REGION      = "eu-north-1"
+        CLUSTER_NAME    = "tyson-cluster-2"
+        DOCKERHUB_USER  = "varaprasadrenati"
+        DOCKER_IMAGE    = "varaprasadrenati/node-app"
+        PATH            = "${env.WORKSPACE}/bin:${env.PATH}"
     }
 
     stages {
 
-        stage('Prepare Tools (kubectl & eksctl)') {
+        stage('Prepare Tools') {
             steps {
                 script {
+                    echo "Installing kubectl and eksctl..."
                     sh '''
                     mkdir -p ${WORKSPACE}/bin
 
-                    # kubectl
+                    # Install kubectl
                     curl -LO https://dl.k8s.io/release/v1.34.1/bin/linux/amd64/kubectl
                     chmod +x kubectl
                     mv kubectl ${WORKSPACE}/bin/
 
-                    # eksctl
+                    # Install eksctl
                     curl -sLO https://github.com/eksctl-io/eksctl/releases/latest/download/eksctl_Linux_amd64.tar.gz
                     tar -xzf eksctl_Linux_amd64.tar.gz
                     mv eksctl ${WORKSPACE}/bin/
@@ -50,7 +51,7 @@ pipeline {
             }
         }
 
-        stage('Install NodeJS Dependencies') {
+        stage('Install Dependencies') {
             steps {
                 sh 'npm install'
             }
@@ -73,14 +74,19 @@ pipeline {
         stage('Create EKS Cluster') {
             steps {
                 script {
+                    echo "Creating EKS Cluster '${CLUSTER_NAME}' if not exists..."
                     sh '''
-                    eksctl create cluster \
-                        --name ${CLUSTER_NAME} \
-                        --region ${AWS_REGION} \
-                        --nodegroup-name worker-nodes \
-                        --node-type t3.medium \
-                        --nodes 2 \
-                        --managed || echo "Cluster may already exist"
+                    if ! eksctl get cluster --name ${CLUSTER_NAME} --region ${AWS_REGION} >/dev/null 2>&1; then
+                        eksctl create cluster \
+                            --name ${CLUSTER_NAME} \
+                            --region ${AWS_REGION} \
+                            --nodegroup-name worker-nodes \
+                            --node-type t3.medium \
+                            --nodes 2 \
+                            --managed
+                    else
+                        echo "Cluster ${CLUSTER_NAME} already exists."
+                    fi
                     '''
                 }
             }
@@ -89,23 +95,29 @@ pipeline {
         stage('Deploy NodeJS App to EKS') {
             steps {
                 script {
+                    echo "Deploying NodeJS app..."
                     sh '''
                     aws eks update-kubeconfig --name ${CLUSTER_NAME} --region ${AWS_REGION}
 
-                    # Apply Kubernetes deployment and service
-                    kubectl apply -f nodejsapp.yaml
+                    # Apply Kubernetes manifest
+                    if [ ! -f nodejsapp.yaml ]; then
+                        echo "❌ nodejsapp.yaml not found!"
+                        exit 1
+                    fi
 
-                    # Wait for LoadBalancer hostname
-                    echo "Waiting for LoadBalancer hostname..."
+                    # Replace image in YAML
+                    sed -i "s|image: .*|image: ${DOCKER_IMAGE}|" nodejsapp.yaml
+                    kubectl apply -f nodejsapp.yaml
+                    kubectl rollout status deployment/nodejs-deployment
+
+                    # Wait for LoadBalancer
                     for i in {1..30}; do
                         HOSTNAME=$(kubectl get svc nodejs-service -o jsonpath="{.status.loadBalancer.ingress[0].hostname}" || true)
                         if [ ! -z "$HOSTNAME" ]; then
-                            echo "==========================================="
                             echo "✅ NodeJS App URL: http://$HOSTNAME:3000"
-                            echo "==========================================="
                             break
                         fi
-                        echo "Waiting... ($i/30)"
+                        echo "Waiting for LoadBalancer ($i/30)..."
                         sleep 20
                     done
                     '''
@@ -117,6 +129,12 @@ pipeline {
     post {
         always {
             echo 'Pipeline execution finished ✅'
+        }
+        success {
+            echo 'NodeJS App deployed successfully!'
+        }
+        failure {
+            echo '❌ Deployment failed. Check logs above.'
         }
     }
 }
