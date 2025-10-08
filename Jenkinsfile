@@ -6,111 +6,140 @@ pipeline {
     }
 
     environment {
-        AWS_REGION = "eu-north-1"
-        CLUSTER_NAME = "tyson-cluster-1"
-        DOCKERHUB_USER = "varaprasadrenati"
-        DOCKER_IMAGE = "varaprasadrenati/node-app"
-        PATH = "${env.WORKSPACE}/bin:${env.PATH}"
+        DOCKER_HUB_USER = 'varaprasadrenati'
+        DOCKER_CREDENTIALS_ID = 'docker-creds'
+        IMAGE_NAME = 'myntra-node-app'
+        AWS_REGION = 'eu-north-1'
+        EKS_CLUSTER = 'tyson-cluster'
+        HOME_BIN = "$HOME/bin"
+        VPC_PUBLIC_SUBNETS = 'subnet-aaaaaa,subnet-bbbbbb'
+        VPC_PRIVATE_SUBNETS = 'subnet-xxxxxx,subnet-yyyyyy'
     }
 
     stages {
 
-        stage('Prepare Tools (kubectl & eksctl)') {
+        stage('Clone Code from GitHub') {
             steps {
-                script {
-                    echo "Installing kubectl and eksctl locally..."
-                    sh '''
-                    mkdir -p ${WORKSPACE}/bin
-
-                    # kubectl
-                    curl -LO https://dl.k8s.io/release/v1.34.1/bin/linux/amd64/kubectl
-                    chmod +x kubectl
-                    mv kubectl ${WORKSPACE}/bin/
-
-                    # eksctl
-                    curl -sLO https://github.com/eksctl-io/eksctl/releases/latest/download/eksctl_Linux_amd64.tar.gz
-                    tar -xzf eksctl_Linux_amd64.tar.gz
-                    mv eksctl ${WORKSPACE}/bin/
-
-                    kubectl version --client
-                    eksctl version
-                    '''
-                }
+                checkout([$class: 'GitSCM',
+                    branches: [[name: '*/main']],
+                    userRemoteConfigs: [[
+                        url: 'https://github.com/laddu344/Myntra.git',
+                        credentialsId: 'GITHUB_CREDENTIALS'
+                    ]]
+                ])
             }
         }
 
-        stage('Clone code from GitHub') {
-            steps {
-                script {
-                    checkout scmGit(
-                        branches: [[name: '*/main']],
-                        extensions: [],
-                        userRemoteConfigs: [[
-                            credentialsId: 'github-creds',
-                            url: 'https://github.com/laddu344/docker_web_app.git'
-                        ]]
-                    )
-                }
-            }
-        }
-
-        stage('Node JS Build') {
+        stage('Install Dependencies') {
             steps {
                 sh 'npm install'
             }
         }
 
-        stage('Build & Push Docker Image') {
+        stage('Build Docker Image') {
             steps {
                 script {
-                    withCredentials([usernamePassword(credentialsId: 'docker-creds', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
-                        sh '''
-                        echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin
-                        docker build -t $DOCKER_IMAGE .
-                        docker push $DOCKER_IMAGE
-                        '''
-                    }
+                    def imageTag = "${DOCKER_HUB_USER}/${IMAGE_NAME}:${BUILD_NUMBER}"
+                    sh "docker build -t ${imageTag} ."
                 }
             }
         }
 
-        stage('Create EKS Cluster') {
+        stage('Push Image to DockerHub') {
             steps {
                 script {
-                    echo "Creating EKS Cluster '${CLUSTER_NAME}'..."
+                    def imageTag = "${DOCKER_HUB_USER}/${IMAGE_NAME}:${BUILD_NUMBER}"
+                    withCredentials([usernamePassword(
+                        credentialsId: "${DOCKER_CREDENTIALS_ID}",
+                        usernameVariable: 'DOCKER_USER',
+                        passwordVariable: 'DOCKER_PASS'
+                    )]) {
+                        sh 'echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin'
+                    }
+                    sh "docker push ${imageTag}"
+                }
+            }
+        }
+
+        stage('Install eksctl & kubectl') {
+            steps {
+                script {
                     sh '''
-                    eksctl create cluster \
-                        --name ${CLUSTER_NAME} \
-                        --region ${AWS_REGION} \
-                        --nodegroup-name worker-nodes \
-                        --node-type t3.medium \
-                        --nodes 2 \
-                        --managed
+                    mkdir -p $HOME/bin
+                    export PATH=$HOME/bin:$PATH
+
+                    # Install eksctl
+                    if ! command -v eksctl >/dev/null 2>&1; then
+                        curl --silent --location "https://github.com/weaveworks/eksctl/releases/latest/download/eksctl_$(uname -s)_amd64.tar.gz" | tar xz -C /tmp
+                        mv /tmp/eksctl $HOME/bin/
+                        chmod +x $HOME/bin/eksctl
+                    fi
+
+                    # Install kubectl
+                    if ! command -v kubectl >/dev/null 2>&1; then
+                        curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+                        chmod +x kubectl
+                        mv kubectl $HOME/bin/
+                    fi
                     '''
                 }
             }
         }
 
-        stage('Deploy NodeJS App on EKS') {
+        stage('Create EKS Cluster if Not Exists') {
             steps {
                 script {
-                    echo "Deploying NodeJS App to EKS..."
                     sh '''
-                    aws eks update-kubeconfig --name ${CLUSTER_NAME} --region ${AWS_REGION}
-                    kubectl apply -f nodejsapp.yaml
+                    export PATH=$HOME/bin:$PATH
 
-                    echo "Waiting for LoadBalancer hostname..."
-                    for i in {1..30}; do
-                        HOSTNAME=$(kubectl get svc nodejs-service -o jsonpath="{.status.loadBalancer.ingress[0].hostname}" || true)
-                        if [ ! -z "$HOSTNAME" ]; then
-                            echo "==========================================="
-                            echo "✅ NodeJS App URL: http://$HOSTNAME:3000"
-                            echo "==========================================="
-                            break
-                        fi
-                        echo "Waiting for LoadBalancer to be ready... ($i/30)"
-                        sleep 20
-                    done
+                    if ! eksctl get cluster --name ${EKS_CLUSTER} --region ${AWS_REGION} >/dev/null 2>&1; then
+                        echo "Cluster not found. Creating EKS cluster in existing VPC..."
+                        eksctl create cluster \
+                            --name ${EKS_CLUSTER} \
+                            --region ${AWS_REGION} \
+                            --nodegroup-name worker-nodes \
+                            --node-type t3.medium \
+                            --nodes 2 \
+                            --managed \
+                            --vpc-public-subnets=${VPC_PUBLIC_SUBNETS} \
+                            --vpc-private-subnets=${VPC_PRIVATE_SUBNETS}
+                    else
+                        echo "Cluster ${EKS_CLUSTER} already exists."
+                    fi
+                    '''
+                }
+            }
+        }
+
+        stage('Deploy to EKS Cluster') {
+            steps {
+                script {
+                    sh '''
+                    export PATH=$HOME/bin:$PATH
+
+                    # Configure kubeconfig
+                    aws eks update-kubeconfig --name ${EKS_CLUSTER} --region ${AWS_REGION}
+
+                    # Ensure deployment.yaml exists
+                    if [ ! -f deployment.yaml ]; then
+                        echo "❌ deployment.yaml not found!"
+                        exit 1
+                    fi
+
+                    # Update Docker image
+                    sed -i "s|image: .*|image: ${DOCKER_HUB_USER}/${IMAGE_NAME}:${BUILD_NUMBER}|" deployment.yaml
+
+                    # Deploy to Kubernetes
+                    kubectl apply -f deployment.yaml
+                    kubectl rollout status deployment/myntra-node-app-deployment
+
+                    # Get LoadBalancer URL
+                    APP_URL=$(kubectl get svc myntra-node-app-service -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+                    if [ -z "$APP_URL" ]; then
+                        echo "⚠️ LoadBalancer URL not ready. Check AWS console."
+                    else
+                        echo "✅ Application is live at: http://$APP_URL"
+                    fi
                     '''
                 }
             }
@@ -118,8 +147,11 @@ pipeline {
     }
 
     post {
-        always {
-            echo 'Pipeline execution finished ✅'
+        success {
+            echo "✅ Deployment completed successfully!"
+        }
+        failure {
+            echo "❌ Deployment failed. Check the logs above."
         }
     }
 }
