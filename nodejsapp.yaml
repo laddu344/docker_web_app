@@ -7,7 +7,7 @@ metadata:
   labels:
     app: nodejs-app
 spec:
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       app: nodejs-app
@@ -18,9 +18,21 @@ spec:
     spec:
       containers:
       - name: nodejs-app
-        image: varaprasadrenati/node-app:latest   # Your Docker image
+        image: varaprasadrenati/node-app:latest
         ports:
-          - containerPort: 3000
+        - containerPort: 3000
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 3000
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 3000
+          initialDelaySeconds: 10
+          periodSeconds: 15
 ---
 apiVersion: v1
 kind: Service
@@ -28,11 +40,10 @@ metadata:
   name: nodejs-service
   namespace: default
 spec:
-  type: NodePort          # NodePort is required for Classic ELB
   selector:
     app: nodejs-app
+  type: NodePort
   ports:
-    - name: http
-      port: 80            # Port exposed by the service
-      targetPort: 3000    # Container port
-      nodePort: 3000      # Must match ELB health check
+    - port: 80         # Internal service port
+      targetPort: 3000 # Container port
+      nodePort: 30001  # NodePort must be 30000-32767
