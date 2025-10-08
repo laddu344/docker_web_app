@@ -10,25 +10,28 @@ pipeline {
         CLUSTER_NAME = "tyson-cluster"
         DOCKERHUB_USER = "varaprasadrenati"
         DOCKER_IMAGE = "varaprasadrenati/node-app"
+        PATH = "${env.WORKSPACE}/bin:${env.PATH}" // Add local bin to PATH
     }
 
     stages {
 
-        stage('Install kubectl & eksctl') {
+        stage('Prepare Tools (kubectl & eksctl)') {
             steps {
                 script {
-                    echo "Installing kubectl and eksctl..."
+                    echo "Installing kubectl and eksctl locally..."
                     sh '''
-                    # Install kubectl (latest version for EKS)
+                    mkdir -p $WORKSPACE/bin
+
+                    # Install kubectl
                     curl -o kubectl https://s3.us-west-2.amazonaws.com/amazon-eks/1.30.0/2024-09-20/bin/linux/amd64/kubectl
                     chmod +x ./kubectl
-                    mv ./kubectl /usr/local/bin/kubectl
+                    mv ./kubectl $WORKSPACE/bin/
                     kubectl version --client
 
                     # Install eksctl
                     curl -sLO "https://github.com/eksctl-io/eksctl/releases/latest/download/eksctl_$(uname -s)_amd64.tar.gz"
                     tar -xzf eksctl_$(uname -s)_amd64.tar.gz
-                    mv eksctl /usr/local/bin
+                    mv eksctl $WORKSPACE/bin/
                     eksctl version
                     '''
                 }
@@ -37,16 +40,13 @@ pipeline {
 
         stage('Clone code from GitHub') {
             steps {
-                script {
-                    checkout scmGit(
-                        branches: [[name: '*/main']],
-                        extensions: [],
-                        userRemoteConfigs: [[
-                            credentialsId: 'github-creds',
-                            url: 'https://github.com/laddu344/docker_web_app.git'
-                        ]]
-                    )
-                }
+                checkout([$class: 'GitSCM',
+                    branches: [[name: '*/main']],
+                    userRemoteConfigs: [[
+                        credentialsId: 'github-creds',
+                        url: 'https://github.com/laddu344/docker_web_app.git'
+                    ]]
+                ])
             }
         }
 
@@ -61,7 +61,6 @@ pipeline {
                 script {
                     withCredentials([string(credentialsId: 'docker-creds', variable: 'DOCKER_PASS')]) {
                         sh '''
-                        echo "Logging into DockerHub..."
                         echo $DOCKER_PASS | docker login -u ${DOCKERHUB_USER} --password-stdin
                         docker build -t ${DOCKER_IMAGE} .
                         docker push ${DOCKER_IMAGE}
@@ -71,10 +70,10 @@ pipeline {
             }
         }
 
-        stage('Create EKS Cluster (tyson-cluster)') {
+        stage('Create EKS Cluster') {
             steps {
                 script {
-                    echo "Creating EKS Cluster 'tyson-cluster' with 2 nodes in eu-north-1..."
+                    echo "Creating EKS Cluster '${CLUSTER_NAME}'..."
                     sh '''
                     eksctl create cluster \
                         --name ${CLUSTER_NAME} \
@@ -91,7 +90,6 @@ pipeline {
         stage('Deploy NodeJS App on EKS') {
             steps {
                 script {
-                    echo "Deploying NodeJS App to EKS..."
                     sh '''
                     aws eks update-kubeconfig --name ${CLUSTER_NAME} --region ${AWS_REGION}
                     kubectl apply -f nodejsapp.yaml
