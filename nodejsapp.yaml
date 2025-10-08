@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
       - name: nodejs-app
-        image: varaprasadrenati/node-app-1.0
+        image: varaprasadrenati/node-app:latest 
         ports:
           - containerPort: 3000
         env:
@@ -38,3 +38,4 @@ spec:
     - name: http
       port: 80
       targetPort: 3000
+
