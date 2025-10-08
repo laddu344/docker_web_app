@@ -20,6 +20,10 @@ spec:
         image: varaprasadrenati/node-app-1.0
         ports:
           - containerPort: 3000
+        command: ["node", "index.js"]
+        env:
+          - name: PORT
+            value: "3000"
         imagePullPolicy: Always
 ---
 apiVersion: v1
