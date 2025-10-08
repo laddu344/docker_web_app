@@ -8,7 +8,7 @@ pipeline {
     environment {
         AWS_REGION = "eu-north-1"
         CLUSTER_NAME = "tyson-cluster"
-        DOCKERHUB_USER = "varaprasadrenati"
+        DOCKERHUB_USER = "varaprasadrenati"   // optional, we will use credentials username
         DOCKER_IMAGE = "varaprasadrenati/node-app"
         PATH = "${env.WORKSPACE}/bin:${env.PATH}" // Add local bin to PATH
     }
@@ -59,9 +59,11 @@ pipeline {
         stage('Build & Push Docker Image') {
             steps {
                 script {
-                    withCredentials([string(credentialsId: 'docker-creds', variable: 'DOCKER_PASS')]) {
+                    withCredentials([usernamePassword(credentialsId: 'docker-creds', 
+                                                      usernameVariable: 'DOCKER_USER', 
+                                                      passwordVariable: 'DOCKER_PASS')]) {
                         sh '''
-                        echo $DOCKER_PASS | docker login -u ${DOCKERHUB_USER} --password-stdin
+                        echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin
                         docker build -t ${DOCKER_IMAGE} .
                         docker push ${DOCKER_IMAGE}
                         '''
