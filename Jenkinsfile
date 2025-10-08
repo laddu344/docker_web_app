@@ -18,7 +18,6 @@ pipeline {
         stage('Prepare Tools (kubectl & eksctl)') {
             steps {
                 script {
-                    echo "Installing kubectl and eksctl locally..."
                     sh '''
                     mkdir -p ${WORKSPACE}/bin
 
@@ -39,22 +38,19 @@ pipeline {
             }
         }
 
-        stage('Clone code from GitHub') {
+        stage('Clone NodeJS App') {
             steps {
-                script {
-                    checkout scmGit(
-                        branches: [[name: '*/main']],
-                        extensions: [],
-                        userRemoteConfigs: [[
-                            credentialsId: 'github-creds',
-                            url: 'https://github.com/laddu344/docker_web_app.git'
-                        ]]
-                    )
-                }
+                checkout([$class: 'GitSCM',
+                    branches: [[name: '*/main']],
+                    userRemoteConfigs: [[
+                        url: 'https://github.com/laddu344/docker_web_app.git',
+                        credentialsId: 'github-creds'
+                    ]]
+                ])
             }
         }
 
-        stage('Node JS Build') {
+        stage('Install NodeJS Dependencies') {
             steps {
                 sh 'npm install'
             }
@@ -77,7 +73,6 @@ pipeline {
         stage('Create EKS Cluster') {
             steps {
                 script {
-                    echo "Creating EKS Cluster '${CLUSTER_NAME}'..."
                     sh '''
                     eksctl create cluster \
                         --name ${CLUSTER_NAME} \
@@ -85,20 +80,22 @@ pipeline {
                         --nodegroup-name worker-nodes \
                         --node-type t3.medium \
                         --nodes 2 \
-                        --managed
+                        --managed || echo "Cluster may already exist"
                     '''
                 }
             }
         }
 
-        stage('Deploy NodeJS App on EKS') {
+        stage('Deploy NodeJS App to EKS') {
             steps {
                 script {
-                    echo "Deploying NodeJS App to EKS..."
                     sh '''
                     aws eks update-kubeconfig --name ${CLUSTER_NAME} --region ${AWS_REGION}
+
+                    # Apply Kubernetes deployment and service
                     kubectl apply -f nodejsapp.yaml
 
+                    # Wait for LoadBalancer hostname
                     echo "Waiting for LoadBalancer hostname..."
                     for i in {1..30}; do
                         HOSTNAME=$(kubectl get svc nodejs-service -o jsonpath="{.status.loadBalancer.ingress[0].hostname}" || true)
@@ -108,7 +105,7 @@ pipeline {
                             echo "==========================================="
                             break
                         fi
-                        echo "Waiting for LoadBalancer to be ready... ($i/30)"
+                        echo "Waiting... ($i/30)"
                         sleep 20
                     done
                     '''
