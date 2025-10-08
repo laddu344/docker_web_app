@@ -8,9 +8,9 @@ pipeline {
     environment {
         AWS_REGION = "eu-north-1"
         CLUSTER_NAME = "tyson-cluster"
-        DOCKERHUB_USER = "varaprasadrenati"   // optional, we will use credentials username
+        DOCKERHUB_USER = "varaprasadrenati"
         DOCKER_IMAGE = "varaprasadrenati/node-app"
-        PATH = "${env.WORKSPACE}/bin:${env.PATH}" // Add local bin to PATH
+        PATH = "${env.WORKSPACE}/bin:${env.PATH}"
     }
 
     stages {
@@ -20,18 +20,19 @@ pipeline {
                 script {
                     echo "Installing kubectl and eksctl locally..."
                     sh '''
-                    mkdir -p $WORKSPACE/bin
+                    mkdir -p ${WORKSPACE}/bin
 
-                    # Install kubectl (latest stable version)
-                    curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+                    # kubectl
+                    curl -LO https://dl.k8s.io/release/v1.34.1/bin/linux/amd64/kubectl
                     chmod +x kubectl
-                    mv kubectl $WORKSPACE/bin/
-                    kubectl version --client
+                    mv kubectl ${WORKSPACE}/bin/
 
-                    # Install eksctl (latest release)
-                    curl -sLO "https://github.com/eksctl-io/eksctl/releases/latest/download/eksctl_$(uname -s)_amd64.tar.gz"
-                    tar -xzf eksctl_$(uname -s)_amd64.tar.gz
-                    mv eksctl $WORKSPACE/bin/
+                    # eksctl
+                    curl -sLO https://github.com/eksctl-io/eksctl/releases/latest/download/eksctl_Linux_amd64.tar.gz
+                    tar -xzf eksctl_Linux_amd64.tar.gz
+                    mv eksctl ${WORKSPACE}/bin/
+
+                    kubectl version --client
                     eksctl version
                     '''
                 }
@@ -40,13 +41,16 @@ pipeline {
 
         stage('Clone code from GitHub') {
             steps {
-                checkout([$class: 'GitSCM',
-                    branches: [[name: '*/main']],
-                    userRemoteConfigs: [[
-                        credentialsId: 'github-creds',
-                        url: 'https://github.com/laddu344/docker_web_app.git'
-                    ]]
-                ])
+                script {
+                    checkout scmGit(
+                        branches: [[name: '*/main']],
+                        extensions: [],
+                        userRemoteConfigs: [[
+                            credentialsId: 'github-creds',
+                            url: 'https://github.com/laddu344/docker_web_app.git'
+                        ]]
+                    )
+                }
             }
         }
 
@@ -59,13 +63,11 @@ pipeline {
         stage('Build & Push Docker Image') {
             steps {
                 script {
-                    withCredentials([usernamePassword(credentialsId: 'docker-creds', 
-                                                      usernameVariable: 'DOCKER_USER', 
-                                                      passwordVariable: 'DOCKER_PASS')]) {
+                    withCredentials([usernamePassword(credentialsId: 'docker-creds', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
                         sh '''
                         echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin
-                        docker build -t ${DOCKER_IMAGE} .
-                        docker push ${DOCKER_IMAGE}
+                        docker build -t $DOCKER_IMAGE .
+                        docker push $DOCKER_IMAGE
                         '''
                     }
                 }
@@ -92,16 +94,17 @@ pipeline {
         stage('Deploy NodeJS App on EKS') {
             steps {
                 script {
+                    echo "Deploying NodeJS App to EKS..."
                     sh '''
                     aws eks update-kubeconfig --name ${CLUSTER_NAME} --region ${AWS_REGION}
                     kubectl apply -f nodejsapp.yaml
 
-                    echo "Waiting for LoadBalancer URL..."
+                    echo "Waiting for LoadBalancer hostname..."
                     for i in {1..30}; do
-                        URL=$(kubectl get svc nodejs-service -o jsonpath="{.status.loadBalancer.ingress[0].hostname}" || true)
-                        if [ ! -z "$URL" ]; then
+                        HOSTNAME=$(kubectl get svc nodejs-service -o jsonpath="{.status.loadBalancer.ingress[0].hostname}" || true)
+                        if [ ! -z "$HOSTNAME" ]; then
                             echo "==========================================="
-                            echo "✅ NodeJS App URL: http://$URL:3000"
+                            echo "✅ NodeJS App URL: http://$HOSTNAME:3000"
                             echo "==========================================="
                             break
                         fi
