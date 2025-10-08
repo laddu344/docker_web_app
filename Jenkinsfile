@@ -41,16 +41,7 @@ pipeline {
 
         stage('Clone code from GitHub') {
             steps {
-                script {
-                    checkout scmGit(
-                        branches: [[name: '*/main']],
-                        extensions: [],
-                        userRemoteConfigs: [[
-                            credentialsId: 'github-creds',
-                            url: 'https://github.com/laddu344/docker_web_app.git'
-                        ]]
-                    )
-                }
+                checkout scm
             }
         }
 
@@ -66,7 +57,7 @@ pipeline {
                     withCredentials([usernamePassword(credentialsId: 'docker-creds', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
                         sh '''
                         echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin
-                        docker build -t $DOCKER_IMAGE .
+                        docker build -t $DOCKER_IMAGE . 
                         docker push $DOCKER_IMAGE
                         '''
                     }
@@ -74,19 +65,26 @@ pipeline {
             }
         }
 
-        stage('Create EKS Cluster') {
+        stage('Create/Check EKS Cluster') {
             steps {
                 script {
-                    echo "Creating EKS Cluster '${CLUSTER_NAME}'..."
-                    sh '''
-                    eksctl create cluster \
-                        --name ${CLUSTER_NAME} \
-                        --region ${AWS_REGION} \
-                        --nodegroup-name worker-nodes \
-                        --node-type c7i-flex.large \
-                        --nodes 2 \
-                        --managed
-                    '''
+                    echo "Checking if EKS Cluster '${CLUSTER_NAME}' exists..."
+                    def clusterExists = sh(script: "eksctl get cluster --name ${CLUSTER_NAME} --region ${AWS_REGION}", returnStatus: true) == 0
+                    if (!clusterExists) {
+                        echo "Cluster does not exist. Creating EKS Cluster..."
+                        sh """
+                        eksctl create cluster \
+                            --name ${CLUSTER_NAME} \
+                            --region ${AWS_REGION} \
+                            --nodegroup-name worker-nodes \
+                            --node-type c7i-flex.large \
+                            --nodes 2 \
+                            --managed
+                        """
+                    } else {
+                        echo "Cluster already exists. Skipping creation."
+                    }
+                    sh "aws eks update-kubeconfig --name ${CLUSTER_NAME} --region ${AWS_REGION}"
                 }
             }
         }
@@ -96,19 +94,19 @@ pipeline {
                 script {
                     echo "Deploying NodeJS App to EKS..."
                     sh '''
-                    aws eks update-kubeconfig --name ${CLUSTER_NAME} --region ${AWS_REGION}
                     kubectl apply -f nodejsapp.yaml
 
-                    echo "Waiting for LoadBalancer hostname..."
+                    echo "Waiting for LoadBalancer hostname and pod readiness..."
                     for i in {1..30}; do
                         HOSTNAME=$(kubectl get svc nodejs-service -o jsonpath="{.status.loadBalancer.ingress[0].hostname}" || true)
-                        if [ ! -z "$HOSTNAME" ]; then
+                        READY=$(kubectl get pods -l app=nodejs-app -o jsonpath="{.items[0].status.containerStatuses[0].ready}")
+                        if [ ! -z "$HOSTNAME" ] && [ "$READY" == "true" ]; then
                             echo "==========================================="
-                            echo "✅ NodeJS App URL: http://$HOSTNAME:3000"
+                            echo "✅ NodeJS App URL: http://$HOSTNAME"
                             echo "==========================================="
                             break
                         fi
-                        echo "Waiting for LoadBalancer to be ready... ($i/30)"
+                        echo "Waiting for LoadBalancer and pod readiness... ($i/30)"
                         sleep 20
                     done
                     '''
