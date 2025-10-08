@@ -1,11 +1,13 @@
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: nodejs-app
+  namespace: default
   labels:
     app: nodejs-app
 spec:
-  replicas: 1
+  replicas: 2
   selector:
     matchLabels:
       app: nodejs-app
@@ -16,26 +18,21 @@ spec:
     spec:
       containers:
       - name: nodejs-app
-        image: varaprasadrenati/node-app:latest 
+        image: varaprasadrenati/node-app:latest   # Your Docker image
         ports:
           - containerPort: 3000
-        env:
-          - name: PORT
-            value: "3000"
-        imagePullPolicy: Always
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: nodejs-service
-  labels:
-    app: nodejs-app
+  namespace: default
 spec:
-  type: LoadBalancer
+  type: NodePort          # NodePort is required for Classic ELB
   selector:
     app: nodejs-app
   ports:
     - name: http
-      port: 80
-      targetPort: 3000
-
+      port: 80            # Port exposed by the service
+      targetPort: 3000    # Container port
+      nodePort: 3000      # Must match ELB health check
