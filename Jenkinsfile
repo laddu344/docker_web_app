@@ -22,13 +22,13 @@ pipeline {
                     sh '''
                     mkdir -p $WORKSPACE/bin
 
-                    # Install kubectl
-                    curl -o kubectl https://s3.us-west-2.amazonaws.com/amazon-eks/1.30.0/2024-09-20/bin/linux/amd64/kubectl
-                    chmod +x ./kubectl
-                    mv ./kubectl $WORKSPACE/bin/
+                    # Install kubectl (latest stable version)
+                    curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+                    chmod +x kubectl
+                    mv kubectl $WORKSPACE/bin/
                     kubectl version --client
 
-                    # Install eksctl
+                    # Install eksctl (latest release)
                     curl -sLO "https://github.com/eksctl-io/eksctl/releases/latest/download/eksctl_$(uname -s)_amd64.tar.gz"
                     tar -xzf eksctl_$(uname -s)_amd64.tar.gz
                     mv eksctl $WORKSPACE/bin/
