@@ -80,20 +80,13 @@ pipeline {
 
                     if ! eksctl get cluster --name ${CLUSTER_NAME} --region ${AWS_REGION} >/dev/null 2>&1; then
                         echo "Cluster not found. Creating EKS cluster using default VPC..."
-
-                        DEFAULT_VPC=$(aws ec2 describe-vpcs --filters Name=isDefault,Values=true --query 'Vpcs[0].VpcId' --output text)
-                        PUBLIC_SUBNETS=$(aws ec2 describe-subnets --filters "Name=vpc-id,Values=$DEFAULT_VPC" "Name=mapPublicIpOnLaunch,Values=true" --query 'Subnets[].SubnetId' --output text)
-                        PRIVATE_SUBNETS=$(aws ec2 describe-subnets --filters "Name=vpc-id,Values=$DEFAULT_VPC" "Name=mapPublicIpOnLaunch,Values=false" --query 'Subnets[].SubnetId' --output text)
-
                         eksctl create cluster \
                             --name ${CLUSTER_NAME} \
                             --region ${AWS_REGION} \
                             --nodegroup-name worker-nodes \
                             --node-type t3.medium \
                             --nodes 2 \
-                            --managed \
-                            --vpc-public-subnets=$PUBLIC_SUBNETS \
-                            --vpc-private-subnets=$PRIVATE_SUBNETS
+                            --managed
                     else
                         echo "Cluster ${CLUSTER_NAME} already exists."
                     fi
@@ -107,20 +100,25 @@ pipeline {
                 script {
                     echo "Deploying NodeJS app..."
                     sh '''
+                    export PATH=${WORKSPACE}/bin:$PATH
+
+                    # Configure kubeconfig
                     aws eks update-kubeconfig --name ${CLUSTER_NAME} --region ${AWS_REGION}
 
-                    # Apply Kubernetes manifest
+                    # Ensure Kubernetes manifest exists
                     if [ ! -f nodejsapp.yaml ]; then
                         echo "❌ nodejsapp.yaml not found!"
                         exit 1
                     fi
 
-                    # Replace image in YAML
+                    # Update Docker image in YAML
                     sed -i "s|image: .*|image: ${DOCKER_IMAGE}|" nodejsapp.yaml
+
+                    # Deploy to Kubernetes
                     kubectl apply -f nodejsapp.yaml
                     kubectl rollout status deployment/nodejs-deployment
 
-                    # Wait for LoadBalancer
+                    # Wait for LoadBalancer URL
                     for i in {1..30}; do
                         HOSTNAME=$(kubectl get svc nodejs-service -o jsonpath="{.status.loadBalancer.ingress[0].hostname}" || true)
                         if [ ! -z "$HOSTNAME" ]; then
