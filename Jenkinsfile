@@ -83,7 +83,7 @@ pipeline {
                         --name ${CLUSTER_NAME} \
                         --region ${AWS_REGION} \
                         --nodegroup-name worker-nodes \
-                        --node-type t3.medium \
+                        --node-type c7i-flex.large \
                         --nodes 2 \
                         --managed
                     '''
