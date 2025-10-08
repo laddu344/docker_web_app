@@ -7,7 +7,7 @@ pipeline {
 
     environment {
         AWS_REGION      = "eu-north-1"
-        CLUSTER_NAME    = "tyson-cluster-2"
+        CLUSTER_NAME    = "tyson-cluster-3"
         DOCKERHUB_USER  = "varaprasadrenati"
         DOCKER_IMAGE    = "varaprasadrenati/node-app"
         PATH            = "${env.WORKSPACE}/bin:${env.PATH}"
