@@ -9,7 +9,7 @@ pipeline {
         AWS_REGION = "eu-north-1"
         CLUSTER_NAME = "tyson-cluster"
         DOCKERHUB_USER = "varaprasadrenati"
-        DOCKER_IMAGE = "varaprasadrenati/node-app-1.0"
+        DOCKER_IMAGE = "varaprasadrenati/node-app"
     }
 
     stages {
@@ -42,7 +42,7 @@ pipeline {
                         branches: [[name: '*/main']],
                         extensions: [],
                         userRemoteConfigs: [[
-                            credentialsId: 'GITHUB_CREDENTIALS',
+                            credentialsId: 'github-creds',
                             url: 'https://github.com/laddu344/docker_web_app.git'
                         ]]
                     )
