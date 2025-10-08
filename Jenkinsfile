@@ -7,7 +7,7 @@ pipeline {
 
     environment {
         AWS_REGION      = "eu-north-1"
-        CLUSTER_NAME    = "tyson-cluster-3"
+        CLUSTER_NAME    = "tyson-cluster-5"
         DOCKERHUB_USER  = "varaprasadrenati"
         DOCKER_IMAGE    = "varaprasadrenati/node-app"
         PATH            = "${env.WORKSPACE}/bin:${env.PATH}"
@@ -71,19 +71,29 @@ pipeline {
             }
         }
 
-        stage('Create EKS Cluster') {
+        stage('Create EKS Cluster (Default VPC)') {
             steps {
                 script {
-                    echo "Creating EKS Cluster '${CLUSTER_NAME}' if not exists..."
+                    echo "Creating EKS Cluster '${CLUSTER_NAME}' in default VPC if not exists..."
                     sh '''
+                    export PATH=${WORKSPACE}/bin:$PATH
+
                     if ! eksctl get cluster --name ${CLUSTER_NAME} --region ${AWS_REGION} >/dev/null 2>&1; then
+                        echo "Cluster not found. Creating EKS cluster using default VPC..."
+
+                        DEFAULT_VPC=$(aws ec2 describe-vpcs --filters Name=isDefault,Values=true --query 'Vpcs[0].VpcId' --output text)
+                        PUBLIC_SUBNETS=$(aws ec2 describe-subnets --filters "Name=vpc-id,Values=$DEFAULT_VPC" "Name=mapPublicIpOnLaunch,Values=true" --query 'Subnets[].SubnetId' --output text)
+                        PRIVATE_SUBNETS=$(aws ec2 describe-subnets --filters "Name=vpc-id,Values=$DEFAULT_VPC" "Name=mapPublicIpOnLaunch,Values=false" --query 'Subnets[].SubnetId' --output text)
+
                         eksctl create cluster \
                             --name ${CLUSTER_NAME} \
                             --region ${AWS_REGION} \
                             --nodegroup-name worker-nodes \
                             --node-type t3.medium \
                             --nodes 2 \
-                            --managed
+                            --managed \
+                            --vpc-public-subnets=$PUBLIC_SUBNETS \
+                            --vpc-private-subnets=$PRIVATE_SUBNETS
                     else
                         echo "Cluster ${CLUSTER_NAME} already exists."
                     fi
