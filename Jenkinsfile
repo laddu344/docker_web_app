@@ -43,7 +43,7 @@ pipeline {
                         extensions: [],
                         userRemoteConfigs: [[
                             credentialsId: 'GITHUB_CREDENTIALS',
-                            url: 'https://github.com/devopshint/Deploy-NodeApp-to-AWS-EKS-using-Jenkins-Pipeline'
+                            url: 'https://github.com/laddu344/docker_web_app.git'
                         ]]
                     )
                 }
@@ -59,7 +59,7 @@ pipeline {
         stage('Build & Push Docker Image') {
             steps {
                 script {
-                    withCredentials([string(credentialsId: 'varaprasadrenati_dockerhub_token', variable: 'DOCKER_PASS')]) {
+                    withCredentials([string(credentialsId: 'docker-creds', variable: 'DOCKER_PASS')]) {
                         sh '''
                         echo "Logging into DockerHub..."
                         echo $DOCKER_PASS | docker login -u ${DOCKERHUB_USER} --password-stdin
