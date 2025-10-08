@@ -19,20 +19,10 @@ spec:
         image: varaprasadrenati/node-app-1.0
         ports:
           - containerPort: 3000
+        env:
+          - name: PORT
+            value: "3000"
         imagePullPolicy: Always
-        readinessProbe:
-          httpGet:
-            path: /ready
-            port: 3000
-          initialDelaySeconds: 5
-          periodSeconds: 5
-        livenessProbe:
-          httpGet:
-            path: /healthz
-            port: 3000
-          initialDelaySeconds: 10
-          periodSeconds: 10
-
 ---
 apiVersion: v1
 kind: Service
